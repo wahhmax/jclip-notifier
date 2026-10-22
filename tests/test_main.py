@@ -77,6 +77,19 @@ class TwitchWatcherTests(unittest.TestCase):
             if "embeds" in payload:
                 self.assertEqual(payload["embeds"][0]["color"], 0x9146FF)
 
+    def test_no_new_clips_does_not_send_discord_messages(self):
+        for clips in (
+            [],
+            [self.clip("already-sent"), self.clip("too-old", 16), self.clip("future", -1)],
+        ):
+            with self.subTest(clips=clips):
+                self.fetch.return_value = clips
+
+                watcher.main()
+
+                self.post.assert_not_called()
+                self.assertEqual(self.saved_ids(), ["already-sent"])
+
     def test_partial_failure_saves_successes_and_retries_only_unsent_clips(self):
         self.fetch.return_value = [
             self.clip("first", 3), self.clip("retry", 2), self.clip("last", 1),

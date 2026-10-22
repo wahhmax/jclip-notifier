@@ -369,6 +369,8 @@ def process_twitch_clips(state):
             new_clips[clip["id"]] = clip
     clips = sorted(new_clips.values(), key=lambda clip: parse_time(clip["created_at"]))
     print(f"Twitch: {len(clips)} clips novos nos últimos {RECENT_WINDOW_MINUTES} minutos.")
+    if not clips:
+        return
     successful = send_interval_message(cutoff, now, len(clips))
     for clip in clips:
         if send_to_discord(clip):
@@ -404,4 +406,3 @@ if __name__ == "__main__":
     except Exception as error:
         print(f"CHECK FALHOU: {type(error).__name__}")
         sys.exit(1)
-
