@@ -365,8 +365,16 @@ def process_twitch_clips(state):
     new_clips = {}
     for clip in get_twitch_clips():
         created_at = parse_time(clip["created_at"])
-        if clip["id"] not in seen and cutoff <= created_at <= now:
+        if clip["id"] in seen:
+            reason = "já enviado"
+        elif created_at < cutoff:
+            reason = "fora do intervalo de 15 minutos"
+        elif created_at > now:
+            reason = "data posterior ao início da verificação"
+        else:
+            reason = "novo, elegível para envio"
             new_clips[clip["id"]] = clip
+        print(f"Twitch clip {clip['id']}: criado em {created_at.isoformat()}; {reason}.")
     clips = sorted(new_clips.values(), key=lambda clip: parse_time(clip["created_at"]))
     print(f"Twitch: {len(clips)} clips novos nos últimos {RECENT_WINDOW_MINUTES} minutos.")
     if not clips:
