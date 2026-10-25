@@ -68,7 +68,7 @@ class TwitchWatcherTests(unittest.TestCase):
             "https://clips.twitch.tv/older", "https://clips.twitch.tv/newer",
         ])
         self.assertEqual(self.saved_ids(), ["already-sent", "older", "newer"])
-        self.assertEqual(self.post.call_count, 3)
+        self.assertEqual(self.post.call_count, 2)
         for call in self.post.call_args_list:
             self.assertEqual(call.args[0], self.webhook)
             payload = call.kwargs["json"]
@@ -94,7 +94,7 @@ class TwitchWatcherTests(unittest.TestCase):
         self.fetch.return_value = [
             self.clip("first", 3), self.clip("retry", 2), self.clip("last", 1),
         ]
-        self.post.side_effect = [Mock(status_code=status) for status in (204, 204, 400, 204)]
+        self.post.side_effect = [Mock(status_code=status) for status in (204, 400, 204)]
 
         with self.assertRaisesRegex(RuntimeError, "envios para o Discord falharam"):
             watcher.main()
@@ -113,11 +113,13 @@ class TwitchWatcherTests(unittest.TestCase):
         self.post.assert_not_called()
         self.assertEqual(self.saved_ids(), ["already-sent"])
 
-    def test_failed_summary_still_saves_successfully_sent_clip(self):
+    def test_single_new_clip_sends_only_clip_message(self):
         self.fetch.return_value = [self.clip("new")]
-        self.post.side_effect = [Mock(status_code=400), Mock(status_code=204)]
-        with self.assertRaises(RuntimeError):
-            watcher.main()
+        watcher.main()
+        self.assertEqual(self.post.call_count, 1)
+        payload = self.post.call_args.kwargs["json"]
+        self.assertIn("embeds", payload)
+        self.assertEqual(payload["content"], "🎬 **NOVO CLIP DO JOTTA | TWITCH**")
         self.assertEqual(self.saved_ids(), ["already-sent", "new"])
 
 
