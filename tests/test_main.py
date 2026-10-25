@@ -113,13 +113,41 @@ class TwitchWatcherTests(unittest.TestCase):
         self.post.assert_not_called()
         self.assertEqual(self.saved_ids(), ["already-sent"])
 
+    def test_thumbnail_appears_in_embed_when_available(self):
+        clip = self.clip("picture")
+        clip["thumbnail_url"] = "https://static-cdn.jtvnw.net/clip-preview.jpg"
+        clip["creator_name"] = "heylinkpt"
+        clip["view_count"] = 7
+        self.fetch.return_value = [clip]
+
+        watcher.main()
+
+        payload = self.post.call_args.kwargs["json"]
+        embed = payload["embeds"][0]
+        self.assertEqual(embed["image"]["url"], clip["thumbnail_url"])
+        self.assertEqual(embed["title"], "Clip picture")
+        self.assertEqual(embed["fields"][1]["value"], "heylinkpt")
+        self.assertEqual(embed["fields"][2]["value"], "7")
+
+    def test_missing_thumbnail_does_not_break_notification(self):
+        self.fetch.return_value = [self.clip("no-image")]
+        watcher.main()
+        payload = self.post.call_args.kwargs["json"]
+        self.assertNotIn("image", payload["embeds"][0])
+
     def test_single_new_clip_sends_only_clip_message(self):
         self.fetch.return_value = [self.clip("new")]
         watcher.main()
         self.assertEqual(self.post.call_count, 1)
         payload = self.post.call_args.kwargs["json"]
         self.assertIn("embeds", payload)
-        self.assertEqual(payload["content"], "🎬 **NOVO CLIP DO JOTTA | TWITCH**")
+        self.assertNotIn("content", payload)
+        self.assertEqual(self.post.call_args.kwargs["params"], {"with_components": "true"})
+        self.assertEqual(payload["embeds"][0]["fields"][3]["value"], "05/10/2026 às 19:59 UTC")
+        button = payload["components"][0]["components"][0]
+        self.assertEqual(button["style"], 5)
+        self.assertEqual(button["label"], "Abrir clip")
+        self.assertEqual(button["url"], "https://clips.twitch.tv/new")
         self.assertEqual(self.saved_ids(), ["already-sent", "new"])
 
 
