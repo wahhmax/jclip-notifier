@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   discord-preview:
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: preview Discord clip notification'
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'preview')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
