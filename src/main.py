@@ -319,17 +319,6 @@ def discord_post(webhook, payload):
     return False
 
 
-def send_interval_message(start_time, end_time, clip_count):
-    return discord_post(DISCORD_WEBHOOK, {
-        "username": "JOTTA Twitch Clip Watcher",
-        "content": (
-            "🕐 **JOTTA Twitch Clip Watcher**\n\n"
-            f"Clips entre **{start_time:%H:%M:%S}** e **{end_time:%H:%M:%S} UTC**\n\n"
-            f"🎯 **{clip_count} clips novos detetados**"
-        ),
-    })
-
-
 def send_to_discord(clip):
     return discord_post(DISCORD_WEBHOOK, {
         "username": "JOTTA Twitch Clip Watcher",
@@ -379,7 +368,7 @@ def process_twitch_clips(state):
     print(f"Twitch: {len(clips)} clips novos nos últimos {RECENT_WINDOW_MINUTES} minutos.")
     if not clips:
         return
-    successful = send_interval_message(cutoff, now, len(clips))
+    successful = True
     for clip in clips:
         if send_to_discord(clip):
             history.append(clip["id"])
