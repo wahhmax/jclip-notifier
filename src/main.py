@@ -356,10 +356,6 @@ def send_to_discord(clip):
         "footer": {"text": "JOTTA Twitch Clip Watcher"},
     }
 
-    thumbnail_url = clip.get("thumbnail_url")
-    if thumbnail_url and thumbnail_url.startswith("https://"):
-        embed["image"] = {"url": thumbnail_url}
-
     return discord_post(DISCORD_WEBHOOK, {
         "username": "JOTTA Twitch Clip Watcher",
         "embeds": [embed],
