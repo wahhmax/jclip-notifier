@@ -327,16 +327,11 @@ def discord_post(webhook, payload):
 def send_to_discord(clip):
     published_at = parse_time(clip["created_at"]).astimezone(timezone.utc)
     embed = {
-        "author": {"name": "🎬 Novo clip do JOTTA na Twitch"},
+        "author": {"name": "🎬 Novo clip detetado!"},
         "title": (clip.get("title") or "Novo clip do JOTTA")[:256],
         "url": clip["url"],
         "color": 0x9146FF,
         "fields": [
-            {
-                "name": "📺 Streamer",
-                "value": CHANNEL,
-                "inline": True,
-            },
             {
                 "name": "✂️ Criado por",
                 "value": str(clip.get("creator_name") or "Desconhecido")[:1024],
