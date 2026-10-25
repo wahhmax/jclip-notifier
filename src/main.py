@@ -294,7 +294,12 @@ def discord_post(webhook, payload):
     payload["allowed_mentions"] = {"parse": []}
     for attempt in range(1, 6):
         try:
-            response = requests.post(webhook, json=payload, timeout=30)
+            response = requests.post(
+                webhook,
+                params={"with_components": "true"} if payload.get("components") else None,
+                json=payload,
+                timeout=30,
+            )
         except requests.RequestException:
             # Não imprimir a exceção: pode conter o URL secreto do webhook.
             print("Discord: falha de ligação; envio não confirmado.")
@@ -320,20 +325,52 @@ def discord_post(webhook, payload):
 
 
 def send_to_discord(clip):
+    published_at = parse_time(clip["created_at"]).astimezone(timezone.utc)
+    embed = {
+        "author": {"name": "🎬 Novo clip do JOTTA na Twitch"},
+        "title": (clip.get("title") or "Novo clip do JOTTA")[:256],
+        "url": clip["url"],
+        "color": 0x9146FF,
+        "fields": [
+            {
+                "name": "📺 Streamer",
+                "value": CHANNEL,
+                "inline": True,
+            },
+            {
+                "name": "✂️ Criado por",
+                "value": str(clip.get("creator_name") or "Desconhecido")[:1024],
+                "inline": True,
+            },
+            {
+                "name": "👁️ Visualizações",
+                "value": str(clip.get("view_count", 0)),
+                "inline": True,
+            },
+            {
+                "name": "🕒 Publicado",
+                "value": published_at.strftime("%d/%m/%Y às %H:%M UTC"),
+                "inline": False,
+            },
+        ],
+        "footer": {"text": "JOTTA Twitch Clip Watcher"},
+    }
+
+    thumbnail_url = clip.get("thumbnail_url")
+    if thumbnail_url and thumbnail_url.startswith("https://"):
+        embed["image"] = {"url": thumbnail_url}
+
     return discord_post(DISCORD_WEBHOOK, {
         "username": "JOTTA Twitch Clip Watcher",
-        "content": "🎬 **NOVO CLIP DO JOTTA | TWITCH**",
-        "embeds": [{
-            "title": (clip.get("title") or "Novo clip")[:256],
-            "url": clip["url"],
-            "color": 0x9146FF,
-            "description": (
-                f"📺 **Streamer:** {CHANNEL}\n\n"
-                f"✂️ **Criado por:** {clip.get('creator_name', 'Desconhecido')}\n\n"
-                f"👁️ **Visualizações:** {clip.get('view_count', 0)}\n\n"
-                f"🕐 **Publicado:** {clip['created_at']}"
-            ),
-            "footer": {"text": "JOTTA Twitch Clip Watcher"},
+        "embeds": [embed],
+        "components": [{
+            "type": 1,
+            "components": [{
+                "type": 2,
+                "style": 5,
+                "label": "Abrir clip",
+                "url": clip["url"],
+            }],
         }],
     })
 
