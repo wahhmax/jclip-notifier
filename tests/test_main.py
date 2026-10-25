@@ -113,7 +113,7 @@ class TwitchWatcherTests(unittest.TestCase):
         self.post.assert_not_called()
         self.assertEqual(self.saved_ids(), ["already-sent"])
 
-    def test_thumbnail_appears_in_embed_when_available(self):
+    def test_thumbnail_is_omitted_even_if_twitch_provides_it(self):
         clip = self.clip("picture")
         clip["thumbnail_url"] = "https://static-cdn.jtvnw.net/clip-preview.jpg"
         clip["creator_name"] = "heylinkpt"
@@ -124,10 +124,12 @@ class TwitchWatcherTests(unittest.TestCase):
 
         payload = self.post.call_args.kwargs["json"]
         embed = payload["embeds"][0]
-        self.assertEqual(embed["image"]["url"], clip["thumbnail_url"])
+        self.assertNotIn("image", embed)
+        self.assertNotIn("thumbnail", embed)
         self.assertEqual(embed["title"], "Clip picture")
         self.assertEqual(embed["fields"][1]["value"], "heylinkpt")
         self.assertEqual(embed["fields"][2]["value"], "7")
+        self.assertEqual(payload["components"][0]["components"][0]["url"], clip["url"])
 
     def test_missing_thumbnail_does_not_break_notification(self):
         self.fetch.return_value = [self.clip("no-image")]
