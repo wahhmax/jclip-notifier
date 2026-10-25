@@ -127,8 +127,8 @@ class TwitchWatcherTests(unittest.TestCase):
         self.assertNotIn("image", embed)
         self.assertNotIn("thumbnail", embed)
         self.assertEqual(embed["title"], "Clip picture")
-        self.assertEqual(embed["fields"][1]["value"], "heylinkpt")
-        self.assertEqual(embed["fields"][2]["value"], "7")
+        self.assertEqual(embed["fields"][0]["value"], "heylinkpt")
+        self.assertEqual(embed["fields"][1]["value"], "7")
         self.assertEqual(payload["components"][0]["components"][0]["url"], clip["url"])
 
     def test_missing_thumbnail_does_not_break_notification(self):
@@ -145,7 +145,9 @@ class TwitchWatcherTests(unittest.TestCase):
         self.assertIn("embeds", payload)
         self.assertNotIn("content", payload)
         self.assertEqual(self.post.call_args.kwargs["params"], {"with_components": "true"})
-        self.assertEqual(payload["embeds"][0]["fields"][3]["value"], "05/10/2026 às 19:59 UTC")
+        self.assertEqual(payload["embeds"][0]["fields"][2]["value"], "05/10/2026 às 19:59 UTC")
+        self.assertEqual(payload["embeds"][0]["author"]["name"], "🎬 Novo clip detetado!")
+        self.assertNotIn("Streamer", str(payload["embeds"][0]["fields"]))
         button = payload["components"][0]["components"][0]
         self.assertEqual(button["style"], 5)
         self.assertEqual(button["label"], "Abrir clip")
