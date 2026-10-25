@@ -1,0 +1,65 @@
+name: Testar notificacao Discord
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/discord-preview.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  discord-preview:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test: preview Discord clip notification'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Enviar um clip de teste ao Discord
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          DISCORD_CLIP_WEBHOOK_URL: ${{ secrets.DISCORD_CLIP_WEBHOOK_URL }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from src.main import get_access_token, get_channel_id, twitch_get, send_to_discord
+
+          now = datetime.now(timezone.utc)
+          token = get_access_token()
+          channel_id = get_channel_id(token)
+          response = twitch_get("clips", token, {
+              "broadcaster_id": channel_id,
+              "started_at": (now - timedelta(days=7)).isoformat(),
+              "ended_at": now.isoformat(),
+              "first": 100,
+          })
+          clips = response.get("data", [])
+          if clips:
+              clip = next((c for c in clips if c.get("thumbnail_url")), clips[0]).copy()
+          else:
+              clip = {
+                  "id": "discord-layout-test",
+                  "title": "Clip de exemplo",
+                  "url": "https://www.twitch.tv/jotta/clip/FurtiveElatedOstrichOneHand-Ga2NHz4J2zo-b9NT",
+                  "creator_name": "Clipador",
+                  "view_count": 1,
+                  "created_at": now.isoformat(),
+              }
+          clip["title"] = "🧪 TESTE | " + (clip.get("title") or "Clip do JOTTA")[:220]
+
+          if not send_to_discord(clip):
+              raise SystemExit("Falha ao enviar a notificacao de teste.")
+          print("Notificacao de teste enviada ao Discord.")
+          PY
