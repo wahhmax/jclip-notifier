@@ -132,6 +132,7 @@ class StatusWebhookTests(unittest.TestCase):
 
     def test_portuguese_summer_time(self):
         self.now = datetime(2026, 7, 9, 12, 30, tzinfo=timezone.utc)
+        watcher.now_utc.return_value = self.now
         watcher.main()
         self.assertIn("13:30 (hora de Portugal)", self.status_messages()[0])
         self.assertIn("13:30 (hora de Portugal)", self.status_messages()[1])
