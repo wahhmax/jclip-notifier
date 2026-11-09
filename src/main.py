@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -21,6 +22,7 @@ CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 
 DISCORD_WEBHOOK = os.getenv("DISCORD_CLIP_WEBHOOK_URL")
 KICK_WEBHOOK = os.getenv("DISCORD_KICK_CLIP_WEBHOOK_URL")
+STATUS_WEBHOOK = os.getenv("DISCORD_STATUS_WEBHOOK_URL")
 
 STATE_FILE = "data/state.json"
 
@@ -325,6 +327,40 @@ def discord_post(webhook, payload):
     return False
 
 
+def send_check_status(platform, clips_count=None, skipped=False):
+    """Envia uma mensagem simples para o webhook de verificações.
+
+    Uma mensagem por plataforma, mesmo quando não existem clips novos.
+    Nunca interfere com o envio normal dos clips.
+    """
+    if not STATUS_WEBHOOK:
+        return
+
+    checked_at = now_utc().astimezone(ZoneInfo("Europe/Lisbon"))
+    hour = checked_at.strftime("%H:%M")
+    if skipped:
+        message = (
+            f"⚪ {platform}: verificação não realizada às {hour} "
+            "(hora de Portugal). Plataforma desativada."
+        )
+    elif clips_count is None:
+        message = (
+            f"🔴 {platform}: a verificação falhou às {hour} "
+            "(hora de Portugal). Não foi possível confirmar quantos clips novos existem."
+        )
+    else:
+        message = (
+            f"🟢 {platform}: verificação realizada às {hour} "
+            f"(hora de Portugal). Clips novos detetados: {clips_count}."
+        )
+
+    if not discord_post(STATUS_WEBHOOK, {
+        "username": "JOTTA Clip Watcher | Verificações",
+        "content": message,
+    }):
+        print(f"{platform}: não foi possível enviar o relatório de verificação.")
+
+
 def send_to_discord(clip, webhook=None, platform="Twitch"):
     # O formato é o mesmo em ambas as plataformas: título, criador,
     # visualizações, data e botão, sem imagem nem mensagem adicional.
@@ -483,7 +519,7 @@ def process_kick_clips(state):
     clips = sorted(new_clips.values(), key=lambda clip: parse_time(clip["created_at"]))
     print(f"Kick: {len(clips)} clips novos nos últimos {RECENT_WINDOW_MINUTES} minutos.")
     if not clips:
-        return
+        return 0
 
     successful = True
     for clip in clips:
@@ -496,6 +532,7 @@ def process_kick_clips(state):
         time.sleep(1)
     if not successful:
         raise RuntimeError("Kick: um ou mais envios para o Discord falharam.")
+    return len(clips)
 
 
 def process_twitch_clips(state):
@@ -520,7 +557,7 @@ def process_twitch_clips(state):
     clips = sorted(new_clips.values(), key=lambda clip: parse_time(clip["created_at"]))
     print(f"Twitch: {len(clips)} clips novos nos últimos {RECENT_WINDOW_MINUTES} minutos.")
     if not clips:
-        return
+        return 0
     successful = True
     for clip in clips:
         if send_to_discord(clip):
@@ -533,36 +570,45 @@ def process_twitch_clips(state):
         time.sleep(1)
     if not successful:
         raise RuntimeError("Twitch: um ou mais envios para o Discord falharam.")
+    return len(clips)
 
 
 def main():
     state = load_state()
     twitch_error = None
     kick_error = None
+    twitch_count = None
+    kick_count = None
+
+    if not STATUS_WEBHOOK:
+        print("Relatórios desativados: configura DISCORD_STATUS_WEBHOOK_URL.")
 
     # Uma falha na Kick não impede o processamento da Twitch, nem o inverso.
     try:
         if not DISCORD_WEBHOOK:
             raise RuntimeError("DISCORD_CLIP_WEBHOOK_URL não configurado.")
-        process_twitch_clips(state)
+        twitch_count = process_twitch_clips(state)
     except Exception as error:
         twitch_error = error
         detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
         print(f"Twitch: falhou: {detail}")
     finally:
         save_state(state)
+        send_check_status("Twitch", twitch_count if twitch_error is None else None)
 
     if KICK_WEBHOOK:
         try:
-            process_kick_clips(state)
+            kick_count = process_kick_clips(state)
         except Exception as error:
             kick_error = error
             detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
             print(f"Kick: falhou: {detail}")
         finally:
             save_state(state)
+            send_check_status("Kick", kick_count if kick_error is None else None)
     else:
         print("Kick desativada: configura DISCORD_KICK_CLIP_WEBHOOK_URL.")
+        send_check_status("Kick", skipped=True)
 
     if twitch_error:
         raise twitch_error
