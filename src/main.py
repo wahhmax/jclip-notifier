@@ -20,6 +20,7 @@ CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 
 DISCORD_WEBHOOK = os.getenv("DISCORD_CLIP_WEBHOOK_URL")
+KICK_WEBHOOK = os.getenv("DISCORD_KICK_CLIP_WEBHOOK_URL")
 
 STATE_FILE = "data/state.json"
 
@@ -324,13 +325,17 @@ def discord_post(webhook, payload):
     return False
 
 
-def send_to_discord(clip):
+def send_to_discord(clip, webhook=None, platform="Twitch"):
+    # O formato é o mesmo em ambas as plataformas: título, criador,
+    # visualizações, data e botão, sem imagem nem mensagem adicional.
+    is_kick = platform == "Kick"
+    destination = DISCORD_WEBHOOK if webhook is None else webhook
     published_at = parse_time(clip["created_at"]).astimezone(timezone.utc)
     embed = {
         "author": {"name": "🎬 Novo clip detetado!"},
         "title": (clip.get("title") or "Novo clip do JOTTA")[:256],
         "url": clip["url"],
-        "color": 0x9146FF,
+        "color": 0x53FC18 if is_kick else 0x9146FF,
         "fields": [
             {
                 "name": "✂️ Criado por",
@@ -348,11 +353,11 @@ def send_to_discord(clip):
                 "inline": False,
             },
         ],
-        "footer": {"text": "JOTTA Twitch Clip Watcher"},
+        "footer": {"text": f"JOTTA {platform} Clip Watcher"},
     }
 
-    return discord_post(DISCORD_WEBHOOK, {
-        "username": "JOTTA Twitch Clip Watcher",
+    return discord_post(destination, {
+        "username": f"JOTTA {platform} Clip Watcher",
         "embeds": [embed],
         "components": [{
             "type": 1,
@@ -371,6 +376,126 @@ def get_twitch_clips():
         raise RuntimeError("Configura TWITCH_CLIENT_ID e TWITCH_CLIENT_SECRET.")
     token = get_access_token()
     return get_last_24h_clips(token, get_channel_id(token))
+
+
+def get_kick_clips():
+    """Clips recentes do canal na API utilizada pelo site da Kick.
+
+    Este endpoint não pertence à API oficial e pode mudar ou bloquear
+    pedidos automáticos. Não é necessária uma chave API adicional.
+    """
+    clips = []
+    found_ids = set()
+    cursors = set()
+    cursor = None
+    oldest_relevant = now_utc() - timedelta(hours=SEARCH_WINDOW_HOURS)
+
+    for page in range(1, MAX_PAGES + 1):
+        params = {"sort": "date", "time": "day"}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            response = requests.get(
+                f"https://kick.com/api/v2/channels/{CHANNEL}/clips",
+                params=params,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0 (compatible; JOTTAClipWatcher/1.0)",
+                },
+                timeout=30,
+            )
+        except requests.RequestException as error:
+            raise RuntimeError("Kick: falha de ligação à API.") from error
+
+        print(f"🌐 Kick clips página {page}: HTTP {response.status_code}")
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Kick: API devolveu HTTP {response.status_code}; "
+                "pode estar indisponível ou a bloquear pedidos automáticos."
+            )
+        try:
+            data = response.json()
+        except ValueError as error:
+            raise RuntimeError("Kick: resposta inválida da API.") from error
+        if not isinstance(data, dict) or not isinstance(data.get("clips"), list):
+            raise RuntimeError("Kick: formato inesperado na resposta de clips.")
+
+        reached_old_clips = False
+        for item in data["clips"]:
+            if not isinstance(item, dict) or not item.get("id") or not item.get("created_at"):
+                continue
+            clip_id = str(item["id"])
+            if clip_id in found_ids:
+                continue
+            found_ids.add(clip_id)
+            created_at = parse_time(item["created_at"])
+            if created_at < oldest_relevant:
+                reached_old_clips = True
+                continue
+            creator = item.get("creator") or {}
+            if isinstance(creator, dict):
+                creator = creator.get("username") or creator.get("name")
+            url = item.get("url")
+            if not isinstance(url, str) or not url.startswith("https://kick.com/"):
+                url = f"https://kick.com/{CHANNEL}?clip={clip_id}"
+            clips.append({
+                "id": clip_id,
+                "title": item.get("title") or "Novo clip do JOTTA",
+                "url": url,
+                "creator_name": creator or "Desconhecido",
+                "view_count": item.get("view_count", item.get("views", 0)),
+                "created_at": item["created_at"],
+            })
+
+        if reached_old_clips:
+            return clips
+        next_cursor = data.get("nextCursor") or data.get("next_cursor")
+        if not next_cursor:
+            return clips
+        if next_cursor in cursors:
+            raise RuntimeError("Kick: cursor de paginação repetido.")
+        cursors.add(next_cursor)
+        cursor = next_cursor
+
+    raise RuntimeError("Kick: limite de páginas atingido; pesquisa incompleta.")
+
+
+def process_kick_clips(state):
+    now = now_utc()
+    cutoff = now - timedelta(minutes=RECENT_WINDOW_MINUTES)
+    history = state.setdefault("kick_seen_clips", [])
+    seen = set(history)
+    new_clips = {}
+
+    for clip in get_kick_clips():
+        created_at = parse_time(clip["created_at"])
+        if clip["id"] in seen:
+            reason = "já enviado"
+        elif created_at < cutoff:
+            reason = "fora do intervalo de 15 minutos"
+        elif created_at > now:
+            reason = "data posterior ao início da verificação"
+        else:
+            reason = "novo, elegível para envio"
+            new_clips[clip["id"]] = clip
+        print(f"Kick clip {clip['id']}: criado em {created_at.isoformat()}; {reason}.")
+
+    clips = sorted(new_clips.values(), key=lambda clip: parse_time(clip["created_at"]))
+    print(f"Kick: {len(clips)} clips novos nos últimos {RECENT_WINDOW_MINUTES} minutos.")
+    if not clips:
+        return
+
+    successful = True
+    for clip in clips:
+        if send_to_discord(clip, webhook=KICK_WEBHOOK, platform="Kick"):
+            history.append(clip["id"])
+            state["kick_seen_clips"] = history[-5000:]
+            save_state(state)
+        else:
+            successful = False
+        time.sleep(1)
+    if not successful:
+        raise RuntimeError("Kick: um ou mais envios para o Discord falharam.")
 
 
 def process_twitch_clips(state):
@@ -412,17 +537,37 @@ def process_twitch_clips(state):
 
 def main():
     state = load_state()
+    twitch_error = None
+    kick_error = None
+
+    # Uma falha na Kick não impede o processamento da Twitch, nem o inverso.
     try:
         if not DISCORD_WEBHOOK:
             raise RuntimeError("DISCORD_CLIP_WEBHOOK_URL não configurado.")
         process_twitch_clips(state)
     except Exception as error:
-        # HTTP exceptions podem incluir URLs secretos; só expor erros controlados.
+        twitch_error = error
         detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
         print(f"Twitch: falhou: {detail}")
-        raise
     finally:
         save_state(state)
+
+    if KICK_WEBHOOK:
+        try:
+            process_kick_clips(state)
+        except Exception as error:
+            kick_error = error
+            detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
+            print(f"Kick: falhou: {detail}")
+        finally:
+            save_state(state)
+    else:
+        print("Kick desativada: configura DISCORD_KICK_CLIP_WEBHOOK_URL.")
+
+    if twitch_error:
+        raise twitch_error
+    if kick_error:
+        raise RuntimeError("Kick: verificação ou envio falhou.") from kick_error
 
 
 if __name__ == "__main__":
